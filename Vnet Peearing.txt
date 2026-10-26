@@ -1,0 +1,486 @@
+Vnet Peearing Using Different Global Region East US or Aus East
+
+This prompt will help you to create required lab for the vnet peearing but concept should be clear before commiting the following prompt and SCRIPT
+Change loacation name in wich you want the VM shouldbe create
+
+PROMPT 1:
+
+Create an Azure CLI Bash script to create all required Azure resources with the following specifications.
+
+Resource Group Name:RG-IT-EASTUS
+Region:East US
+
+Virtual Network Name:VNET-IT-EASTUS
+Address Space:10.0.0.0/16
+
+Subnet Name:SUBNET-IT-EASTUS
+Subnet Address Prefix:10.0.0.0/24
+
+Network Security Group Name:VM-IT-EASTUS-NSG
+
+Public IP Name:VM-IT-EASTUS-PIP
+
+Network Interface Name:VM-IT-EASTUS-NIC
+
+Virtual Machine Name:VM-IT-EASTUS
+
+OS Disk Name:VM-IT-EASTUS-OS-DISK
+
+VM Size:Standard_B2s_v2
+
+OS Image:
+MicrosoftWindowsServer:WindowsServer:2025-datacenter-azure-edition:latest
+
+Administrator Username:
+azureuser
+
+Administrator Password:
+Azure#123456789
+
+Requirements:
+
+1. Use only supported Azure CLI commands. Do not use deprecated Azure CLI commands.
+2. Create the Resource Group using the specified name.
+3. Create the Virtual Network using the specified name.
+4. Create the Subnet using the specified name and make the subnet as private subnet (--default-outbound-access false)
+5. Create the Network Security Group (NSG) using the specified name.
+6. Create the Public IP Address using the specified name.
+7. Create the Network Interface (NIC) using the specified name.
+8. Associate the Public IP Address with the Network Interface.
+9. Associate the NSG  with subnet  only. Do not associate or attach this NSG directly to VM NIC.
+10. Create an inbound NSG rule to allow Remote Desktop (RDP) traffic on TCP port 3389 from any source.
+11. Use the specified OS Image and Create the Virtual Machine as a Trusted Launch VM and attach the previously created Network Interface.
+12. Configure the VM with the specified OS Disk name.
+13. Configure the VM with the specified administrator username and password.
+14. Ensure the Virtual Machine is accessible through Remote Desktop (RDP) using its associated Public IP address.
+15. Create the VM in Availability Zone 1.If the specified VM size or operating system is unavailable in Zone 1, automatically retry in Zone 2.
+16. If Zone 2 is also unavailable, automatically retry in Zone 3.
+17. Use the same Resource Group, VNet, Subnet, NSG, Public IP, NIC, and OS Disk names for all retries..
+18. Display a success message indicating the Availability Zone in which the VM was successfully created.
+19. If the VM cannot be created in Zones 1, 2, or 3, display an appropriate failure message.
+20. Combine all commands into a single Azure CLI Bash script.
+21. Do not change any of the specified resource names, VM size, OS image, username, password, address spaces, or requirements.
+22. Always fulfill every requirement mentioned above.
+
+
+
+
+
+Azure script for above prompt using East US
+
+
+
+
+#!/bin/bash
+
+# Azure Resource Configuration
+RESOURCE_GROUP="RG-IT-EASTUS"
+LOCATION="eastus"
+
+VNET_NAME="VNET-IT-EASTUS"
+VNET_ADDRESS="10.0.0.0/16"
+
+SUBNET_NAME="SUBNET-IT-EASTUS"
+SUBNET_ADDRESS="10.0.0.0/24"
+
+NSG_NAME="VM-IT-EASTUS-NSG"
+PIP_NAME="VM-IT-EASTUS-PIP"
+NIC_NAME="VM-IT-EASTUS-NIC"
+
+VM_NAME="VM-IT-EASTUS"
+OS_DISK_NAME="VM-IT-EASTUS-OS-DISK"
+
+VM_SIZE="Standard_B2s_v2"
+IMAGE="MicrosoftWindowsServer:WindowsServer:2025-datacenter-azure-edition:latest"
+
+ADMIN_USERNAME="azureuser"
+ADMIN_PASSWORD="Azure#123456789"
+
+# ---------------------------------------------------------
+# 1. Create Resource Group
+# ---------------------------------------------------------
+az group create \
+  --name "$RESOURCE_GROUP" \
+  --location "$LOCATION"
+
+# ---------------------------------------------------------
+# 2. Create Virtual Network
+# ---------------------------------------------------------
+az network vnet create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$VNET_NAME" \
+  --location "$LOCATION" \
+  --address-prefixes "$VNET_ADDRESS"
+
+# ---------------------------------------------------------
+# 3. Create Private Subnet
+# ---------------------------------------------------------
+az network vnet subnet create \
+  --resource-group "$RESOURCE_GROUP" \
+  --vnet-name "$VNET_NAME" \
+  --name "$SUBNET_NAME" \
+  --address-prefixes "$SUBNET_ADDRESS" \
+  --default-outbound-access false
+
+# ---------------------------------------------------------
+# 4. Create Network Security Group
+# ---------------------------------------------------------
+az network nsg create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$NSG_NAME" \
+  --location "$LOCATION"
+
+# ---------------------------------------------------------
+# 5. Create RDP Inbound NSG Rule
+# ---------------------------------------------------------
+az network nsg rule create \
+  --resource-group "$RESOURCE_GROUP" \
+  --nsg-name "$NSG_NAME" \
+  --name "Allow-RDP-3389" \
+  --priority 100 \
+  --direction Inbound \
+  --access Allow \
+  --protocol Tcp \
+  --source-address-prefixes "*" \
+  --source-port-ranges "*" \
+  --destination-address-prefixes "*" \
+  --destination-port-ranges 3389
+
+# ---------------------------------------------------------
+# 6. Associate NSG with Subnet ONLY
+# ---------------------------------------------------------
+az network vnet subnet update \
+  --resource-group "$RESOURCE_GROUP" \
+  --vnet-name "$VNET_NAME" \
+  --name "$SUBNET_NAME" \
+  --network-security-group "$NSG_NAME"
+
+# ---------------------------------------------------------
+# 7. Create Public IP
+# ---------------------------------------------------------
+az network public-ip create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$PIP_NAME" \
+  --location "$LOCATION" \
+  --allocation-method Static \
+  --sku Standard
+
+# ---------------------------------------------------------
+# 8. Create NIC and Attach Public IP
+#    NSG is NOT attached to NIC
+# ---------------------------------------------------------
+az network nic create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$NIC_NAME" \
+  --location "$LOCATION" \
+  --vnet-name "$VNET_NAME" \
+  --subnet "$SUBNET_NAME" \
+  --public-ip-address "$PIP_NAME"
+
+# ---------------------------------------------------------
+# 9. Create VM with Zone Retry Logic
+#    Zone 1 -> Zone 2 -> Zone 3
+# ---------------------------------------------------------
+
+VM_CREATED=false
+SUCCESS_ZONE=""
+
+for ZONE in 1 2 3
+do
+    echo "Attempting to create VM in Availability Zone $ZONE..."
+
+    # Remove failed VM if it exists
+    if az vm show \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$VM_NAME" \
+        --output none 2>/dev/null
+    then
+        az vm delete \
+          --resource-group "$RESOURCE_GROUP" \
+          --name "$VM_NAME" \
+          --yes \
+          --output none
+    fi
+
+    # Remove previously created OS disk before retry
+    if az disk show \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$OS_DISK_NAME" \
+        --output none 2>/dev/null
+    then
+        az disk delete \
+          --resource-group "$RESOURCE_GROUP" \
+          --name "$OS_DISK_NAME" \
+          --yes \
+          --output none
+    fi
+
+    # Create Trusted Launch VM
+    if az vm create \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$VM_NAME" \
+        --location "$LOCATION" \
+        --zone "$ZONE" \
+        --size "$VM_SIZE" \
+        --image "$IMAGE" \
+        --nics "$NIC_NAME" \
+        --os-disk-name "$OS_DISK_NAME" \
+        --admin-username "$ADMIN_USERNAME" \
+        --admin-password "$ADMIN_PASSWORD" \
+        --security-type TrustedLaunch \
+        --enable-secure-boot true \
+        --enable-vtpm true \
+        --output none
+    then
+        VM_CREATED=true
+        SUCCESS_ZONE="$ZONE"
+        break
+    else
+        echo "VM creation failed in Availability Zone $ZONE."
+        echo "Retrying in the next Availability Zone..."
+    fi
+done
+
+# ---------------------------------------------------------
+# 10. Final Result
+# ---------------------------------------------------------
+if [ "$VM_CREATED" = true ]
+then
+    PUBLIC_IP=$(az network public-ip show \
+      --resource-group "$RESOURCE_GROUP" \
+      --name "$PIP_NAME" \
+      --query ipAddress \
+      --output tsv)
+
+    echo ""
+    echo "===================================================="
+    echo "VM CREATION SUCCESSFUL"
+    echo "===================================================="
+    echo "VM Name       : $VM_NAME"
+    echo "Availability Zone : $SUCCESS_ZONE"
+    echo "Public IP     : $PUBLIC_IP"
+    echo "RDP Address   : $PUBLIC_IP:3389"
+    echo "Username      : $ADMIN_USERNAME"
+    echo "===================================================="
+else
+    echo ""
+    echo "===================================================="
+    echo "VM CREATION FAILED"
+    echo "===================================================="
+    echo "VM could not be created in Availability Zones 1, 2, or 3."
+    echo "===================================================="
+    exit 1
+fi
+
+
+
+
+
+Azure CLI script for above prompt using Australia East
+
+
+
+
+
+
+
+#!/bin/bash
+
+# Azure Resource Configuration
+RESOURCE_GROUP="RG-IT-AUST-EAST"
+LOCATION="australiaeast"
+
+VNET_NAME="VNET-IT-AUST-EAST"
+VNET_ADDRESS="10.0.0.0/16"
+
+SUBNET_NAME="SUBNET-IT-AUST-EAST"
+SUBNET_ADDRESS="10.0.0.0/24"
+
+NSG_NAME="VM-IT-AUST-EAST-NSG"
+PIP_NAME="VM-IT-AUST-EAST-PIP"
+NIC_NAME="VM-IT-AUST-EAST-NIC"
+
+VM_NAME="VM-IT-AUST-EAST"
+OS_DISK_NAME="VM-IT-AUST-OS-DISK"
+
+VM_SIZE="Standard_B2s_v2"
+IMAGE="MicrosoftWindowsServer:WindowsServer:2025-datacenter-azure-edition:latest"
+
+ADMIN_USERNAME="azureuser"
+ADMIN_PASSWORD="Azure#123456789"
+
+# ---------------------------------------------------------
+# 1. Create Resource Group
+# ---------------------------------------------------------
+az group create \
+  --name "$RESOURCE_GROUP" \
+  --location "$LOCATION"
+
+# ---------------------------------------------------------
+# 2. Create Virtual Network
+# ---------------------------------------------------------
+az network vnet create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$VNET_NAME" \
+  --location "$LOCATION" \
+  --address-prefixes "$VNET_ADDRESS"
+
+# ---------------------------------------------------------
+# 3. Create Private Subnet
+# ---------------------------------------------------------
+az network vnet subnet create \
+  --resource-group "$RESOURCE_GROUP" \
+  --vnet-name "$VNET_NAME" \
+  --name "$SUBNET_NAME" \
+  --address-prefixes "$SUBNET_ADDRESS" \
+  --default-outbound-access false
+
+# ---------------------------------------------------------
+# 4. Create Network Security Group
+# ---------------------------------------------------------
+az network nsg create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$NSG_NAME" \
+  --location "$LOCATION"
+
+# ---------------------------------------------------------
+# 5. Create RDP Inbound NSG Rule
+# ---------------------------------------------------------
+az network nsg rule create \
+  --resource-group "$RESOURCE_GROUP" \
+  --nsg-name "$NSG_NAME" \
+  --name "Allow-RDP-3389" \
+  --priority 100 \
+  --direction Inbound \
+  --access Allow \
+  --protocol Tcp \
+  --source-address-prefixes "*" \
+  --source-port-ranges "*" \
+  --destination-address-prefixes "*" \
+  --destination-port-ranges 3389
+
+# ---------------------------------------------------------
+# 6. Associate NSG with Subnet ONLY
+# ---------------------------------------------------------
+az network vnet subnet update \
+  --resource-group "$RESOURCE_GROUP" \
+  --vnet-name "$VNET_NAME" \
+  --name "$SUBNET_NAME" \
+  --network-security-group "$NSG_NAME"
+
+# ---------------------------------------------------------
+# 7. Create Public IP
+# ---------------------------------------------------------
+az network public-ip create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$PIP_NAME" \
+  --location "$LOCATION" \
+  --allocation-method Static \
+  --sku Standard
+
+# ---------------------------------------------------------
+# 8. Create NIC and Attach Public IP
+#    NSG is NOT attached to NIC
+# ---------------------------------------------------------
+az network nic create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$NIC_NAME" \
+  --location "$LOCATION" \
+  --vnet-name "$VNET_NAME" \
+  --subnet "$SUBNET_NAME" \
+  --public-ip-address "$PIP_NAME"
+
+# ---------------------------------------------------------
+# 9. Create VM with Zone Retry Logic
+#    Zone 1 -> Zone 2 -> Zone 3
+# ---------------------------------------------------------
+
+VM_CREATED=false
+SUCCESS_ZONE=""
+
+for ZONE in 1 2 3
+do
+    echo "Attempting to create VM in Availability Zone $ZONE..."
+
+    # Remove failed VM if it exists
+    if az vm show \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$VM_NAME" \
+        --output none 2>/dev/null
+    then
+        az vm delete \
+          --resource-group "$RESOURCE_GROUP" \
+          --name "$VM_NAME" \
+          --yes \
+          --output none
+    fi
+
+    # Remove previously created OS disk before retry
+    if az disk show \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$OS_DISK_NAME" \
+        --output none 2>/dev/null
+    then
+        az disk delete \
+          --resource-group "$RESOURCE_GROUP" \
+          --name "$OS_DISK_NAME" \
+          --yes \
+          --output none
+    fi
+
+    # Create Trusted Launch VM
+    if az vm create \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$VM_NAME" \
+        --location "$LOCATION" \
+        --zone "$ZONE" \
+        --size "$VM_SIZE" \
+        --image "$IMAGE" \
+        --nics "$NIC_NAME" \
+        --os-disk-name "$OS_DISK_NAME" \
+        --admin-username "$ADMIN_USERNAME" \
+        --admin-password "$ADMIN_PASSWORD" \
+        --security-type TrustedLaunch \
+        --enable-secure-boot true \
+        --enable-vtpm true \
+        --output none
+    then
+        VM_CREATED=true
+        SUCCESS_ZONE="$ZONE"
+        break
+    else
+        echo "VM creation failed in Availability Zone $ZONE."
+        echo "Retrying in the next Availability Zone..."
+    fi
+done
+
+# ---------------------------------------------------------
+# 10. Final Result
+# ---------------------------------------------------------
+if [ "$VM_CREATED" = true ]
+then
+    PUBLIC_IP=$(az network public-ip show \
+      --resource-group "$RESOURCE_GROUP" \
+      --name "$PIP_NAME" \
+      --query ipAddress \
+      --output tsv)
+
+    echo ""
+    echo "===================================================="
+    echo "VM CREATION SUCCESSFUL"
+    echo "===================================================="
+    echo "VM Name       : $VM_NAME"
+    echo "Availability Zone : $SUCCESS_ZONE"
+    echo "Public IP     : $PUBLIC_IP"
+    echo "RDP Address   : $PUBLIC_IP:3389"
+    echo "Username      : $ADMIN_USERNAME"
+    echo "===================================================="
+else
+    echo ""
+    echo "===================================================="
+    echo "VM CREATION FAILED"
+    echo "===================================================="
+    echo "VM could not be created in Availability Zones 1, 2, or 3."
+    echo "===================================================="
+    exit 1
+fi

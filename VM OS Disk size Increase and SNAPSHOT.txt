@@ -1,0 +1,200 @@
+VM OS Disk size Increase and SNAPSHOT
+
+Prompt-1
+
+Whatever information I ask you in this Chat, do not explain; just give answer
+
+Prompt-2
+
+Using Azure CLI, deallocate an existing Azure Virtual Machine with the following specifications:
+
+Resource Group Name: RG-IT-PROD
+Virtual Machine Name: VM-IT-PROD
+
+Requirements:
+1. Use Azure CLI commands only.
+2. Deallocate the existing virtual machine.
+3. Verify that the virtual machine was deallocated successfully.
+4. Combine all commands into a single Azure CLI script.
+5. Always fulfill every requirement mentioned in the question.
+
+Prompt-3
+
+Create an Azure CLI script to increase the OS disk size of an Azure Virtual Machine from 256 GiB to 512 GiB.
+
+Resource Group Name: RG-IT-PROD
+Virtual Machine Name: VM-IT-PROD
+
+Requirements:
+1.  Use supported Azure CLI commands only.Do not use deprecated Azure CLI commands.
+2. Specify the Resource Group name and Virtual Machine name as variables.
+3. Retrieve the OS disk associated with the VM.
+4. Resize the OS disk from 256 GiB to 512 GiB.
+5. Do not create a new disk.
+6. Do not modify the VM size or data disks.
+7. Verify that the OS disk size has been successfully changed to 512 GiB.
+8. The script must terminate with an error if any Azure CLI command fails.
+9. Display a success message only after confirming the OS disk size is 512 GiB.
+10. Combine all commands into a single Azure CLI script.
+11. Always fulfill every requirement mentioned in the question.
+
+
+Prompt-4
+
+Create a Azure CLI script to take a snapshot of the OS disk of an existing Azure Virtual Machine.
+
+Resource Group Name: RG-IT-PROD
+Virtual Machine Name: VM-IT-PROD
+Snapshot Name: VM-IT-PROD-SNAPSHOT
+Snapshot Type: Incremental
+
+Requirements:
+1. Use supported Azure CLI commands only.Do not use deprecated Azure CLI commands.
+2. Specify the Resource Group name, Virtual Machine name, and Snapshot name as variables.
+3. Retrieve the OS disk associated with the VM automatically.
+4. Create a snapshot of the existing OS disk.
+5. Do not create a new VM.
+6. Do not modify the VM or OS disk.
+7. Verify that the snapshot was created successfully.
+8. The script must terminate with an error if any Azure CLI command fails.
+9. Display a success message only after confirming that the snapshot exists.
+10. Combine all commands into a single Azure CLI script.
+11. Always fulfill every requirement mentioned above.
+
+
+Output scriptfor above prompt using azure cli
+
+Prompt-2:
+
+#!/bin/bash
+
+RG="RG-IT-PROD"
+VM="VM-IT-PROD"
+
+az vm deallocate \
+  --resource-group "$RG" \
+  --name "$VM"
+
+az vm get-instance-view \
+  --resource-group "$RG" \
+  --name "$VM" \
+  --query "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus" \
+  --output tsv
+  
+ Prompt-3
+ 
+ #!/bin/bash
+set -euo pipefail
+
+# Variables
+RG="RG-IT-PROD"
+VM="VM-IT-PROD"
+TARGET_SIZE=512
+
+# Retrieve the existing OS disk name
+OS_DISK=$(az vm show \
+  --resource-group "$RG" \
+  --name "$VM" \
+  --query "storageProfile.osDisk.name" \
+  --output tsv)
+
+if [[ -z "$OS_DISK" || "$OS_DISK" == "None" ]]; then
+  echo "ERROR: Unable to retrieve the OS disk for VM $VM." >&2
+  exit 1
+fi
+
+# Retrieve the existing OS disk size
+CURRENT_SIZE=$(az disk show \
+  --resource-group "$RG" \
+  --name "$OS_DISK" \
+  --query "diskSizeGb" \
+  --output tsv)
+
+echo "OS Disk: $OS_DISK"
+echo "Current OS disk size: ${CURRENT_SIZE} GiB"
+
+# Resize the existing OS disk only if needed
+if [[ "$CURRENT_SIZE" -ne "$TARGET_SIZE" ]]; then
+  if [[ "$CURRENT_SIZE" -gt "$TARGET_SIZE" ]]; then
+    echo "ERROR: OS disk size cannot be reduced from ${CURRENT_SIZE} GiB to ${TARGET_SIZE} GiB." >&2
+    exit 1
+  fi
+
+  az disk update \
+    --resource-group "$RG" \
+    --name "$OS_DISK" \
+    --size-gb "$TARGET_SIZE" \
+    --output none
+fi
+
+# Verify the OS disk size
+VERIFIED_SIZE=$(az disk show \
+  --resource-group "$RG" \
+  --name "$OS_DISK" \
+  --query "diskSizeGb" \
+  --output tsv)
+
+if [[ "$VERIFIED_SIZE" -eq "$TARGET_SIZE" ]]; then
+  echo "SUCCESS: OS disk '$OS_DISK' resized and verified at ${TARGET_SIZE} GiB."
+else
+  echo "ERROR: OS disk resize verification failed. Actual size: ${VERIFIED_SIZE} GiB." >&2
+  exit 1
+fi
+
+Prompt 4:
+
+#!/bin/bash
+set -euo pipefail
+
+# Variables
+RG="RG-IT-PROD"
+VM="VM-IT-PROD"
+SNAPSHOT="VM-IT-PROD-SNAPSHOT"
+
+# Retrieve the OS disk ID associated with the VM
+OS_DISK_ID=$(az vm show \
+  --resource-group "$RG" \
+  --name "$VM" \
+  --query "storageProfile.osDisk.managedDisk.id" \
+  --output tsv)
+
+if [[ -z "$OS_DISK_ID" || "$OS_DISK_ID" == "None" ]]; then
+  echo "ERROR: Unable to retrieve the OS disk ID for VM '$VM'." >&2
+  exit 1
+fi
+
+# Create an incremental snapshot of the existing OS disk
+az snapshot create \
+  --resource-group "$RG" \
+  --name "$SNAPSHOT" \
+  --source "$OS_DISK_ID" \
+  --incremental true \
+  --output none
+
+# Verify that the snapshot exists and is incremental
+SNAPSHOT_DETAILS=$(az snapshot show \
+  --resource-group "$RG" \
+  --name "$SNAPSHOT" \
+  --query "{name:name, provisioningState:provisioningState, incremental:incremental, source:creationData.sourceResourceId}" \
+  --output json)
+
+PROVISIONING_STATE=$(az snapshot show \
+  --resource-group "$RG" \
+  --name "$SNAPSHOT" \
+  --query "provisioningState" \
+  --output tsv)
+
+INCREMENTAL=$(az snapshot show \
+  --resource-group "$RG" \
+  --name "$SNAPSHOT" \
+  --query "incremental" \
+  --output tsv)
+
+if [[ "$PROVISIONING_STATE" == "Succeeded" && "$INCREMENTAL" == "true" ]]; then
+  echo "SUCCESS: Incremental snapshot '$SNAPSHOT' created and verified."
+  echo "$SNAPSHOT_DETAILS"
+else
+  echo "ERROR: Snapshot verification failed." >&2
+  echo "$SNAPSHOT_DETAILS" >&2
+  exit 1
+fi
